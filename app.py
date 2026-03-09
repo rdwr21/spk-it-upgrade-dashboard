@@ -1,136 +1,206 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 from saw import calculate_saw
 
 st.set_page_config(
-    page_title="SPK Infrastruktur IT",
-    page_icon="💻",
+    page_title="IT DSS",
     layout="wide"
 )
 
-# ===== Custom CSS =====
+# -----------------------------
+# Custom Styling
+# -----------------------------
 
 st.markdown("""
 <style>
-.main-title {
-    font-size:30px;
-    font-weight:bold;
-}
-
-.kpi-card {
-    background-color:#1f2937;
-    padding:20px;
-    border-radius:10px;
-    color:white;
-    text-align:center;
+body {background-color:#0f172a;}
+.kpi-card{
+background:#1e293b;
+padding:20px;
+border-radius:10px;
+text-align:center;
+color:white;
 }
 </style>
-""", unsafe_allow_html=True)
+""",unsafe_allow_html=True)
 
-# ===== Header =====
+st.title("IT Decision Support System")
+st.caption("Infrastructure Upgrade Analytics Dashboard")
 
-st.markdown('<p class="main-title">💻 Sistem Pendukung Keputusan Infrastruktur IT</p>', unsafe_allow_html=True)
-st.caption("Metode Simple Additive Weighting (SAW)")
+# -----------------------------
+# Sidebar
+# -----------------------------
 
-# ===== Sidebar =====
-
-st.sidebar.title("Menu")
-
-menu = st.sidebar.radio(
-    "Navigation",
-    ["Dashboard","Dataset","Analisis","Ranking"]
-)
+st.sidebar.title("System Control")
 
 uploaded_file = st.sidebar.file_uploader(
-    "Upload Dataset Excel",
-    type=["xlsx"]
+"Upload Infrastructure Dataset",
+type=["xlsx"]
 )
 
-# ===== Load Dataset =====
-
-if uploaded_file:
-    df = pd.read_excel(uploaded_file, sheet_name="Decision_Matrix")
-    df = df.set_index("Alternative")
-else:
+if uploaded_file is None:
     st.warning("Upload dataset terlebih dahulu")
     st.stop()
 
-# ===== Dashboard Page =====
+# -----------------------------
+# Load Dataset
+# -----------------------------
 
-if menu == "Dashboard":
+matrix = pd.read_excel(uploaded_file, sheet_name="Decision_Matrix")
+matrix = matrix.set_index("Alternative")
 
-    st.subheader("Ringkasan Infrastruktur")
+device_info = pd.read_excel(uploaded_file, sheet_name="Device_Info")
 
-    col1,col2,col3 = st.columns(3)
+weights = pd.Series({
+"C1":0.25,
+"C2":0.20,
+"C3":0.20,
+"C4":0.25,
+"C5":0.10
+})
 
-    with col1:
-        st.markdown('<div class="kpi-card">Total Perangkat<br><h2>'+str(len(df))+'</h2></div>',unsafe_allow_html=True)
+benefit_cols = ["C1","C2","C3","C4"]
+cost_cols = ["C5"]
 
-    with col2:
-        st.markdown('<div class="kpi-card">Jumlah Kriteria<br><h2>'+str(len(df.columns))+'</h2></div>',unsafe_allow_html=True)
+ranking, norm = calculate_saw(matrix,weights,benefit_cols,cost_cols)
 
-    with col3:
-        st.markdown('<div class="kpi-card">Metode<br><h2>SAW</h2></div>',unsafe_allow_html=True)
+ranking_df = ranking.reset_index()
+ranking_df.columns=["Alternative","Score"]
 
-# ===== Dataset Page =====
+ranking_df = ranking_df.merge(device_info,on="Alternative")
 
-if menu == "Dataset":
+# -----------------------------
+# Executive Summary
+# -----------------------------
 
-    st.subheader("Dataset Infrastruktur")
+st.subheader("Executive Summary")
 
-    st.dataframe(df,use_container_width=True)
+col1,col2,col3,col4 = st.columns(4)
 
-# ===== Analisis Page =====
+with col1:
+    st.metric("Total Assets",len(ranking_df))
 
-if menu == "Analisis":
+with col2:
+    st.metric("Critical Assets",
+              len(ranking_df[ranking_df["Score"]>0.85]))
 
-    st.subheader("Analisis Dataset")
+with col3:
+    st.metric("Average Risk",
+              round(ranking_df["Score"].mean(),2))
 
-    fig = px.imshow(df,
-                    text_auto=True,
-                    title="Heatmap Nilai Kriteria")
+with col4:
+    st.metric("Top Priority",
+              ranking_df.iloc[0]["Device Name"])
 
-    st.plotly_chart(fig,use_container_width=True)
+# -----------------------------
+# Top Priority Alert
+# -----------------------------
 
-# ===== Ranking Page =====
+top = ranking_df.iloc[0]
 
-if menu == "Ranking":
+st.error(
+f"""
+🚨 **Upgrade Priority Alert**
 
-    st.subheader("Perhitungan SAW")
+Device : **{top['Device Name']}**
 
-    weights = pd.Series({
-        "C1":0.25,
-        "C2":0.20,
-        "C3":0.20,
-        "C4":0.25,
-        "C5":0.10
-    })
+Risk Score : **{round(top['Score'],2)}**
 
-    benefit_cols = ["C1","C2","C3","C4"]
-    cost_cols = ["C5"]
+{top['Description']}
+"""
+)
 
-    ranking, norm = calculate_saw(df,weights,benefit_cols,cost_cols)
+# -----------------------------
+# Priority Ranking Chart
+# -----------------------------
 
-    col1,col2 = st.columns(2)
+st.subheader("Infrastructure Upgrade Priority")
 
-    with col1:
-        st.write("Matriks Normalisasi")
-        st.dataframe(norm)
+fig = px.bar(
+ranking_df,
+x="Device Name",
+y="Score",
+color="Score",
+text="Score"
+)
 
-    with col2:
-        st.write("Ranking Prioritas")
-        st.dataframe(ranking)
+st.plotly_chart(fig,use_container_width=True)
 
-    chart_data = ranking.reset_index()
-    chart_data.columns=["Perangkat","Nilai"]
+# -----------------------------
+# Risk Heatmap
+# -----------------------------
 
-    fig = px.bar(
-        chart_data,
-        x="Perangkat",
-        y="Nilai",
-        color="Nilai",
-        title="Prioritas Upgrade Infrastruktur IT"
-    )
+st.subheader("Infrastructure Risk Heatmap")
 
-    st.plotly_chart(fig,use_container_width=True)
+heatmap = px.imshow(
+matrix,
+text_auto=True,
+color_continuous_scale="Reds"
+)
+
+st.plotly_chart(heatmap,use_container_width=True)
+
+# -----------------------------
+# Asset Lifecycle Chart
+# -----------------------------
+
+st.subheader("Asset Lifecycle Distribution")
+
+age_data = matrix["C1"]
+
+fig2 = px.histogram(
+age_data,
+nbins=5,
+title="Asset Age Distribution"
+)
+
+st.plotly_chart(fig2,use_container_width=True)
+
+# -----------------------------
+# Device Risk Radar Chart
+# -----------------------------
+
+st.subheader("Device Risk Profile")
+
+device = st.selectbox(
+"Select Device",
+ranking_df["Device Name"]
+)
+
+selected = ranking_df[ranking_df["Device Name"]==device]["Alternative"].values[0]
+
+values = matrix.loc[selected].values
+
+categories = matrix.columns.tolist()
+
+fig3 = go.Figure()
+
+fig3.add_trace(go.Scatterpolar(
+r=values,
+theta=categories,
+fill='toself'
+))
+
+fig3.update_layout(
+polar=dict(radialaxis=dict(visible=True)),
+showlegend=False
+)
+
+st.plotly_chart(fig3,use_container_width=True)
+
+# -----------------------------
+# Asset Decision Table
+# -----------------------------
+
+st.subheader("Asset Decision Table")
+
+st.dataframe(
+ranking_df[[
+"Device Name",
+"Score",
+"Description"
+]],
+use_container_width=True
+)
